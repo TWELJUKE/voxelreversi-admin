@@ -239,8 +239,8 @@
 </main>
 
 <script>
-const SUPABASE_URL = "https://eoundtxbupxbrfccejlk.supabase.co";
-const ANON_KEY = "sb_publishable_uFZkixZQjcm7E3ZohcLw4Q_MktOtmn2";
+const SUPABASE_URL = "https://qptgtvxdktxjoxqmwxqo.supabase.co";
+const ANON_KEY = "sb_publishable_ai2xi8e4JFE07z2adD-5cQ_Ssn7QM-A";
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
@@ -305,8 +305,19 @@ async function login() {
   const data = await res.json();
   if (!res.ok || !data.access_token) { msg("loginMsg", "ログインできません：" + (data.error_description || data.msg || res.status), "err"); return; }
   token = data.access_token; uid = data.user.id;
+  let rows = [];
   const chk = await api("/rest/v1/staff?select=user_id&user_id=eq." + uid);
-  const rows = await chk.json().catch(() => []);
+  rows = await chk.json().catch(() => []);
+  if (!rows.length) {
+    // 初期セットアップ: スタッフがまだ1人もいなければ、最初にログインした人を運営として登録する
+    const all = await api("/rest/v1/staff?select=user_id");
+    const allRows = await all.json().catch(() => []);
+    if (Array.isArray(allRows) && allRows.length === 0) {
+      await api("/rest/v1/staff", { method: "POST", headers: { "Prefer": "return=minimal" },
+        body: JSON.stringify([{ user_id: uid, email: data.user.email || "" }]) });
+      rows = [{ user_id: uid }];
+    }
+  }
   if (!rows.length) { msg("loginMsg", "このアカウントは運営スタッフに登録されていません", "err"); token = null; return; }
   $("loginCard").classList.add("hidden");
   $("app").classList.remove("hidden");
