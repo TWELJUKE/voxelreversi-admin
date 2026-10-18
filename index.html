@@ -98,13 +98,14 @@
       <section class="card">
         <h2>ユーザー状況</h2>
         <div class="row">
-          <div class="stat big">登録ユーザー数 <b id="stTotal">-</b> 人</div>
-          <div class="stat">うち 名前あり <b id="stNamed">-</b> 人</div>
+          <div class="stat big">登録ID数 <b id="stTotal">-</b></div>
+          <div class="stat">うち 名前あり <b id="stNamed">-</b></div>
+          <div class="stat">うち ランクあり <b id="stRanked">-</b></div>
           <div class="stat big">オンライン <b id="stOnline">-</b> 人</div>
           <div class="stat big">課金者数 <b id="stPaid">-</b> 人</div>
           <button onclick="loadStats()">更新</button>
         </div>
-        <div class="sub" id="onlineDetail">登録ユーザー数＝アプリを起動した端末ごとの登録数です（アプリを入れ直すと増えます）。オンライン＝最終アクセスが5分以内。プレイ中は約60秒ごとに更新されます。</div>
+        <div class="sub" id="onlineDetail">登録ID数＝アプリが発行したプレイヤーIDの数です（アプリを入れ直すと新しいIDが増えます）。オンライン＝最終アクセスが5分以内。プレイ中は約60秒ごとに更新されます。</div>
         <div class="msg" id="statMsg"></div>
       </section>
 
@@ -397,6 +398,7 @@ async function loadStats() {
     if (res.status === 404) {
       setupHint("vr_profiles");
       $("stProf").textContent = "—"; $("stGames").textContent = "—"; $("stWin").textContent = "—"; $("stMaxRp").textContent = "—";
+      $("stRanked").textContent = "—";
       $("tierBars").innerHTML = ""; $("rankTable").innerHTML = "";
       msg("statMsg", "ランクのテーブル(vr_profiles)がまだありません。下のSQLを実行してください。", "err");
       return;
@@ -406,6 +408,7 @@ async function loadStats() {
     const wins = profs.reduce((a, p) => a + (p.wins || 0), 0);
     const maxRp = profs.reduce((a, p) => Math.max(a, p.rp || 0), 0);
     $("stProf").textContent = profs.length;
+    $("stRanked").textContent = profs.length;
     $("stGames").textContent = games;
     $("stWin").textContent = games ? Math.round(wins / games * 100) : "0";
     $("stMaxRp").textContent = maxRp;
