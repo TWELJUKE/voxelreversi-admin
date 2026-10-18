@@ -349,6 +349,11 @@ async function loadAll() {
   await Promise.all([loadStats(), loadTournaments(), loadCatalog(), loadReports()]);
 }
 
+// 別のタブ(Studio)で新しいスキンを上げた後にこの画面へ戻ってきたら、自動で読み直す
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && token && catalog) loadCatalog();
+});
+
 // ---------- 件数取得 ----------
 async function countOf(path) {
   const res = await fetch(SUPABASE_URL + path, {
@@ -643,7 +648,7 @@ async function setAcqType(id, t) {
   it.acquire = { type: t };
   const box = document.getElementById("acqp_" + id);
   if (box) box.innerHTML = acqParamsHtml(it, id) + `<button class="small" onclick="saveAcq('${id}')">保存</button>`;
-  try { await saveCatalog(); renderSkins(); msg("skMsg", "手に入れ方を変えました（保存済み）", "ok"); }
+  try { await saveCatalog(id); renderSkins(); msg("skMsg", "手に入れ方を変えました（保存済み）", "ok"); }
   catch (e) { msg("skMsg", "保存に失敗：" + e.message, "err"); }
 }
 
@@ -657,16 +662,35 @@ async function saveAcq(id) {
   else if (t === "wins") it.acquire = { type: "wins", wins: parseInt(v("wins", 10), 10) || 0 };
   else if (t === "login") it.acquire = { type: "login", days: parseInt(v("days", 7), 10) || 0 };
   else if (t === "limited") it.acquire = { type: "limited", from: v("from", ""), to: v("to", "") };
-  try { await saveCatalog(); renderSkins(); msg("skMsg", "手に入れ方を保存しました", "ok"); }
+  try { await saveCatalog(id); renderSkins(); msg("skMsg", "手に入れ方を保存しました", "ok"); }
   catch (e) { msg("skMsg", "保存に失敗：" + e.message, "err"); }
 }
 
-async function saveCatalog() {
-  catalog.updated = new Date().toISOString();
+async function latestCatalog() {
+  const res = await api("/rest/v1/vr_catalog?id=eq.main&select=data");
+  if (!res.ok) return null;
+  const rows = await res.json().catch(() => []);
+  const c = rows && rows[0] && rows[0].data;
+  return (c && Array.isArray(c.items)) ? c : null;
+}
+// カタログを保存する。id を渡すと「その1件だけ」を最新のカタログに反映する。
+// ★全体を上書きしないので、別のタブや Studio があとから足したスキンを消してしまう事故が起きない。
+async function saveCatalog(id, removed) {
+  const latest = await latestCatalog();
+  if (!latest) throw new Error("最新のカタログを取得できませんでした（通信を確認してください）");
+  if (id) {
+    const mine = catalog.items.find(x => x.id === id);
+    const i = latest.items.findIndex(x => x.id === id);
+    if (removed || !mine) { if (i >= 0) latest.items.splice(i, 1); }
+    else if (i >= 0) latest.items[i] = mine;
+    else latest.items.push(mine);
+  }
+  latest.updated = new Date().toISOString();
   const res = await api("/rest/v1/vr_catalog?on_conflict=id", { method: "POST",
     headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
-    body: JSON.stringify([{ id: "main", data: catalog, updated_at: new Date().toISOString() }]) });
+    body: JSON.stringify([{ id: "main", data: latest, updated_at: new Date().toISOString() }]) });
   if (!res.ok) throw new Error(await res.text());
+  catalog = latest;      // 画面も最新に合わせる(他で追加されたスキンもここで出る)
 }
 function nextId(kind) {
   let mx = -1;
@@ -676,14 +700,14 @@ function nextId(kind) {
 async function toggleSkin(id) {
   const it = catalog.items.find(x => x.id === id); if (!it) return;
   it.enabled = it.enabled === false ? true : false;
-  try { await saveCatalog(); renderSkins(); renderSkinTabs(); msg("skMsg", "公開状態を変えました", "ok"); }
+  try { await saveCatalog(id); renderSkins(); renderSkinTabs(); msg("skMsg", "公開状態を変えました", "ok"); }
   catch (e) { msg("skMsg", "保存に失敗：" + e.message, "err"); }
 }
 async function deleteSkin(id) {
   const it = catalog.items.find(x => x.id === id); if (!it) return;
   if (!confirm("「" + it.name + "」を削除しますか？")) return;
   catalog.items = catalog.items.filter(x => x.id !== id);
-  try { await saveCatalog(); renderSkins(); renderSkinTabs(); msg("skMsg", "削除しました", "ok"); }
+  try { await saveCatalog(id, true); renderSkins(); renderSkinTabs(); msg("skMsg", "削除しました", "ok"); }
   catch (e) { msg("skMsg", "削除に失敗：" + e.message, "err"); }
 }
 function onSkKindChange() { $("skPreviewMsg").textContent = "画像を選ぶとここにプレビューが出ます"; }
@@ -767,7 +791,7 @@ async function addSkin() {
   };
   catalog.items.push(item);
   try {
-    await saveCatalog();
+    await saveCatalog(item.id);
     $("skName").value = ""; $("skFile").value = ""; pickedImage = null;
     $("skPreview").getContext("2d").clearRect(0,0,128,128);
     $("skPreviewMsg").textContent = "画像を選ぶとここにプレビューが出ます";
