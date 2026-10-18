@@ -757,8 +757,12 @@ async function restoreSkin(id) {
     if (!Array.isArray(latest.trash)) latest.trash = [];
     const it = latest.trash.find(x => x.id === id);
     if (!it) throw new Error("復活させるデータが見つかりません（先に「更新」を押してください）");
+    if (latest.items.some(x => x.id === id)) {
+      msg("skMsg", "同じ番号のスキンがすでにあるので、二重にならないよう何もしませんでした。", "err");
+      return;
+    }
     latest.deleted = (latest.deleted || []).filter(x => x !== id);
-    if (!latest.items.some(x => x.id === id)) latest.items.push(it);
+    latest.items.push(it);
     latest.trash = latest.trash.filter(x => x.id !== id);
     latest.updated = new Date().toISOString();
     const res = await api("/rest/v1/vr_catalog?on_conflict=id", { method: "POST",
