@@ -675,15 +675,21 @@ async function latestCatalog() {
 }
 // カタログを保存する。id を渡すと「その1件だけ」を最新のカタログに反映する。
 // ★全体を上書きしないので、別のタブや Studio があとから足したスキンを消してしまう事故が起きない。
+// ★削除した id は deleted に控えておく。Studio から上げ直しても復活しないようにするため。
 async function saveCatalog(id, removed) {
   const latest = await latestCatalog();
   if (!latest) throw new Error("最新のカタログを取得できませんでした（通信を確認してください）");
+  if (!Array.isArray(latest.deleted)) latest.deleted = [];
   if (id) {
     const mine = catalog.items.find(x => x.id === id);
     const i = latest.items.findIndex(x => x.id === id);
-    if (removed || !mine) { if (i >= 0) latest.items.splice(i, 1); }
+    if (removed || !mine) {
+      if (i >= 0) latest.items.splice(i, 1);
+      if (removed && !latest.deleted.includes(id)) latest.deleted.push(id);
+    }
     else if (i >= 0) latest.items[i] = mine;
     else latest.items.push(mine);
+    if (!removed) latest.deleted = latest.deleted.filter(x => x !== id);   // 入れ直したら解除
   }
   latest.updated = new Date().toISOString();
   const res = await api("/rest/v1/vr_catalog?on_conflict=id", { method: "POST",
