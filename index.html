@@ -210,6 +210,7 @@
           <span class="sub">この管理画面と Studio は同じカタログ（Supabase の vr_catalog）を共有します。</span>
         </div>
         <div class="grid" id="skGrid"></div>
+        <div id="skTrashBox" style="margin-top:18px"></div>
         <div class="msg" id="skMsg"></div>
       </section>
     </div>
@@ -641,6 +642,32 @@ function renderSkins() {
         </div>
       </div></div>`;
   }).join("");
+  renderTrash();
+}
+
+// ★消したスキン(復活できる)を出す
+function renderTrash() {
+  const el = $("skTrashBox");
+  if (!el) return;
+  const tr = (catalog && Array.isArray(catalog.trash)) ? catalog.trash : [];
+  const dl = (catalog && Array.isArray(catalog.deleted)) ? catalog.deleted : [];
+  if (!tr.length && !dl.length) { el.innerHTML = ""; return; }
+  const cards = tr.map((it) => {
+    const id = "sktr_" + esc(it.id);
+    setTimeout(() => { const cv = $(id); if (cv) drawThumb(cv, it); }, 0);
+    return `<div class="skincard off">
+      <canvas id="${id}" width="120" height="120"></canvas>
+      <div class="nm">${esc(it.name || it.id)}</div>
+      <div class="meta">${esc(it.id)} ・ ${esc(it.kind)}</div>
+      <div class="row" style="margin:0;gap:6px">
+        <button class="small" onclick="restoreSkin('${esc(it.id)}')">復活させる</button>
+      </div></div>`;
+  }).join("");
+  const onlyIds = dl.filter((id) => !tr.some((t) => t.id === id));
+  el.innerHTML = `<h2>消したスキン（復活できます）</h2>
+    <div class="grid">${cards || ""}</div>
+    ${onlyIds.length ? `<div class="sub" style="margin-top:8px">中身が残っていない印だけのID：${onlyIds.map(esc).join(", ")}
+      （もう一度アップロードして「追加する」と戻せます）</div>` : ""}`;
 }
 
 async function setAcqType(id, t) {
@@ -675,21 +702,44 @@ async function latestCatalog() {
 }
 // カタログを保存する。id を渡すと「その1件だけ」を最新のカタログに反映する。
 // ★全体を上書きしないので、別のタブや Studio があとから足したスキンを消してしまう事故が起きない。
-// ★削除した id は deleted に控えておく。Studio から上げ直しても復活しないようにするため。
-async function saveCatalog(id, removed) {
+//
+// ★★2026-10-18 見直し(ここが「消したのに復活する」の原因だった):
+//   ・「消した印(deleted)」を勝手に外さない。古いタブから触っても復活しない。
+//   ・消したときは中身を trash に残す(あとから「復活」できる)。
+//   ・「追加する」で入れたときだけ印を外す(それは意図した追加なので)。
+async function saveCatalog(id, opts = {}) {
+  const removed = !!opts.removed, readd = !!opts.readd;
   const latest = await latestCatalog();
   if (!latest) throw new Error("最新のカタログを取得できませんでした（通信を確認してください）");
   if (!Array.isArray(latest.deleted)) latest.deleted = [];
+  if (!Array.isArray(latest.trash)) latest.trash = [];
   if (id) {
     const mine = catalog.items.find(x => x.id === id);
     const i = latest.items.findIndex(x => x.id === id);
-    if (removed || !mine) {
+    const tomb = latest.deleted.includes(id);
+    if (removed) {
+      const gone = i >= 0 ? latest.items[i] : mine;
       if (i >= 0) latest.items.splice(i, 1);
-      if (removed && !latest.deleted.includes(id)) latest.deleted.push(id);
+      if (!tomb) latest.deleted.push(id);
+      if (gone) {
+        latest.trash = latest.trash.filter(x => x.id !== id);
+        latest.trash.push(gone);                 // ★中身を残す → 「復活」で戻せる
+      }
+    } else if (readd) {
+      const it = mine || latest.trash.find(x => x.id === id);
+      latest.deleted = latest.deleted.filter(x => x !== id);
+      if (it) { if (i >= 0) latest.items[i] = it; else latest.items.push(it); }
+      latest.trash = latest.trash.filter(x => x.id !== id);
+    } else if (tomb) {
+      // ★別の場所(Studioなど)で消されている → 勝手に復活させない
+      throw new Error("このスキンは別の場所で削除されています。「更新」を押して読み込み直してください。");
+    } else if (!mine) {
+      // 手元に無い → 何もしない(勝手に消さない・足さない)
+    } else if (i >= 0) {
+      latest.items[i] = mine;
+    } else {
+      latest.items.push(mine);
     }
-    else if (i >= 0) latest.items[i] = mine;
-    else latest.items.push(mine);
-    if (!removed) latest.deleted = latest.deleted.filter(x => x !== id);   // 入れ直したら解除
   }
   latest.updated = new Date().toISOString();
   const res = await api("/rest/v1/vr_catalog?on_conflict=id", { method: "POST",
@@ -697,6 +747,27 @@ async function saveCatalog(id, removed) {
     body: JSON.stringify([{ id: "main", data: latest, updated_at: new Date().toISOString() }]) });
   if (!res.ok) throw new Error(await res.text());
   catalog = latest;      // 画面も最新に合わせる(他で追加されたスキンもここで出る)
+}
+
+// ★消したスキンを復活させる(trash から戻す)
+async function restoreSkin(id) {
+  try {
+    const latest = await latestCatalog();
+    if (!latest) throw new Error("最新のカタログを取得できませんでした");
+    if (!Array.isArray(latest.trash)) latest.trash = [];
+    const it = latest.trash.find(x => x.id === id);
+    if (!it) throw new Error("復活させるデータが見つかりません（先に「更新」を押してください）");
+    latest.deleted = (latest.deleted || []).filter(x => x !== id);
+    if (!latest.items.some(x => x.id === id)) latest.items.push(it);
+    latest.trash = latest.trash.filter(x => x.id !== id);
+    latest.updated = new Date().toISOString();
+    const res = await api("/rest/v1/vr_catalog?on_conflict=id", { method: "POST",
+      headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify([{ id: "main", data: latest, updated_at: new Date().toISOString() }]) });
+    if (!res.ok) throw new Error(await res.text());
+    catalog = latest; renderSkins(); renderSkinTabs();
+    msg("skMsg", "復活させました（ゲームは起動し直すと反映されます）", "ok");
+  } catch (e) { msg("skMsg", "復活に失敗：" + e.message, "err"); }
 }
 function nextId(kind) {
   let mx = -1;
@@ -713,7 +784,7 @@ async function deleteSkin(id) {
   const it = catalog.items.find(x => x.id === id); if (!it) return;
   if (!confirm("「" + it.name + "」を削除しますか？")) return;
   catalog.items = catalog.items.filter(x => x.id !== id);
-  try { await saveCatalog(id, true); renderSkins(); renderSkinTabs(); msg("skMsg", "削除しました", "ok"); }
+  try { await saveCatalog(id, { removed: true }); renderSkins(); renderSkinTabs(); msg("skMsg", "削除しました", "ok"); }
   catch (e) { msg("skMsg", "削除に失敗：" + e.message, "err"); }
 }
 function onSkKindChange() { $("skPreviewMsg").textContent = "画像を選ぶとここにプレビューが出ます"; }
@@ -797,7 +868,7 @@ async function addSkin() {
   };
   catalog.items.push(item);
   try {
-    await saveCatalog(item.id);
+    await saveCatalog(item.id, { readd: true });
     $("skName").value = ""; $("skFile").value = ""; pickedImage = null;
     $("skPreview").getContext("2d").clearRect(0,0,128,128);
     $("skPreviewMsg").textContent = "画像を選ぶとここにプレビューが出ます";
