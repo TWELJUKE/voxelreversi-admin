@@ -45,6 +45,9 @@
   .skincard canvas { width:100%; height:120px; image-rendering:pixelated; background:#0a0e0c; border-radius:6px; }
   .skincard .nm { font-weight:700; font-size:13px; }
   .skincard .meta { color:var(--dim); font-size:11px; }
+  .acqedit { border-top:1px solid var(--line); padding-top:6px; margin-top:2px; display:flex; flex-direction:column; gap:4px; }
+  .acqedit .acqh { font-size:10px; color:var(--dim); letter-spacing:.06em; }
+  .acqedit select, .acqedit input { font-size:11px; padding:3px 5px; }
   .bar { height:16px; background:#0d130f; border-radius:8px; overflow:hidden; display:flex; }
   .bar > div { height:100%; }
   .tierrow { display:grid; grid-template-columns:96px 1fr 60px; gap:10px; align-items:center; margin:3px 0; font-size:13px; }
@@ -577,6 +580,34 @@ function drawThumb(cv, item) {
   drawTexSquare(cv, t);
 }
 
+const ACQ_OPTIONS = [["default","最初から持っている"],["gacha","ガチャで出る"],["rank","ランク達成で手に入る"],
+  ["shop","ショップで買う"],["wins","実績（勝利数）"],["login","ログイン日数"],["limited","期間限定"]];
+
+function acqLabel(a) {
+  a = a || { type: "default" };
+  const t = a.type || "default";
+  if (t === "gacha") return "ガチャ" + (a.gemOnly ? "（ダイヤ）" : "");
+  if (t === "rank") return "ランク:" + (TIERS[a.tier || 0] || "?");
+  if (t === "shop") return "ショップ " + (a.coins ? a.coins + "コイン " : "") + (a.gems ? a.gems + "ダイヤ" : "");
+  if (t === "wins") return "実績 " + (a.wins || 0) + "勝";
+  if (t === "login") return "ログイン" + (a.days || 0) + "日";
+  if (t === "limited") return "期間限定 " + (a.from || "?") + "〜" + (a.to || "?");
+  return "最初から持っている";
+}
+
+function acqParamsHtml(it, id) {
+  const a = it.acquire || { type: "default" };
+  const t = a.type || "default";
+  const num = (k, v, w) => `<input type="number" id="p_${k}_${id}" value="${v}" style="width:${w}px">`;
+  if (t === "gacha") return "排出率 " + num("rate", a.rate != null ? a.rate : 10, 70) + " %";
+  if (t === "shop") return "コイン " + num("coins", a.coins || 0, 80) + " ダイヤ " + num("gems", a.gems || 0, 80);
+  if (t === "rank") return "ランク " + `<select id="p_tier_${id}">` + TIERS.map((n, i) => `<option value="${i}" ${i == (a.tier || 0) ? "selected" : ""}>${n}</option>`).join("") + "</select>";
+  if (t === "wins") return "実績 " + num("wins", a.wins != null ? a.wins : 10, 80) + " 勝";
+  if (t === "login") return "ログイン " + num("days", a.days != null ? a.days : 7, 80) + " 日";
+  if (t === "limited") return `<input type="date" id="p_from_${id}" value="${a.from || ""}"> 〜 <input type="date" id="p_to_${id}" value="${a.to || ""}">`;
+  return '<span class="sub">設定はありません</span>';
+}
+
 function renderSkins() {
   const el = $("skGrid");
   if (!catalog) { el.innerHTML = '<div class="msg">カタログがありません</div>'; return; }
@@ -585,17 +616,51 @@ function renderSkins() {
   el.innerHTML = items.map((it, i) => {
     const id = "skcv_" + i;
     setTimeout(() => { const cv = $(id); if (cv) drawThumb(cv, it); }, 0);
-    const acq = it.acquire && it.acquire.type ? it.acquire.type : "default";
+    const acq = (it.acquire && it.acquire.type) || "default";
     return `<div class="skincard ${it.enabled===false?'off':''}">
       <canvas id="${id}" width="120" height="120"></canvas>
       <div class="nm">${esc(it.name)}</div>
-      <div class="meta">${esc(it.id)} ・ ${esc(it.rarity||"N")} ・ ${esc(acq)}</div>
+      <div class="meta">${esc(it.id)} ・ ${esc(it.rarity||"N")} ・ ${esc(acqLabel(it.acquire))}</div>
       <div class="row" style="margin:0;gap:6px">
         <button class="small ${it.enabled===false?'':'on'}" onclick="toggleSkin('${esc(it.id)}')">${it.enabled===false?"非公開":"公開中"}</button>
         <button class="small danger" onclick="deleteSkin('${esc(it.id)}')">削除</button>
+      </div>
+      <div class="acqedit">
+        <div class="acqh">手に入れ方</div>
+        <select onchange="setAcqType('${esc(it.id)}', this.value)">
+          ${ACQ_OPTIONS.map(([v, l]) => `<option value="${v}" ${v === acq ? "selected" : ""}>${l}</option>`).join("")}
+        </select>
+        <div class="row" id="acqp_${esc(it.id)}" style="margin:4px 0 0;gap:6px;align-items:center">
+          ${acqParamsHtml(it, esc(it.id))}
+          <button class="small" onclick="saveAcq('${esc(it.id)}')">保存</button>
+        </div>
       </div></div>`;
   }).join("");
 }
+
+async function setAcqType(id, t) {
+  const it = catalog.items.find(x => x.id === id); if (!it) return;
+  it.acquire = { type: t };
+  const box = document.getElementById("acqp_" + id);
+  if (box) box.innerHTML = acqParamsHtml(it, id) + `<button class="small" onclick="saveAcq('${id}')">保存</button>`;
+  try { await saveCatalog(); renderSkins(); msg("skMsg", "手に入れ方を変えました（保存済み）", "ok"); }
+  catch (e) { msg("skMsg", "保存に失敗：" + e.message, "err"); }
+}
+
+async function saveAcq(id) {
+  const it = catalog.items.find(x => x.id === id); if (!it) return;
+  const v = (k, d) => { const e = document.getElementById("p_" + k + "_" + id); return e ? e.value : d; };
+  const t = (it.acquire && it.acquire.type) || "default";
+  if (t === "gacha") it.acquire = { type: "gacha", rate: parseInt(v("rate", 10), 10) || 0, gemOnly: false };
+  else if (t === "shop") it.acquire = { type: "shop", coins: parseInt(v("coins", 0), 10) || 0, gems: parseInt(v("gems", 0), 10) || 0 };
+  else if (t === "rank") it.acquire = { type: "rank", tier: parseInt(v("tier", 0), 10) || 0 };
+  else if (t === "wins") it.acquire = { type: "wins", wins: parseInt(v("wins", 10), 10) || 0 };
+  else if (t === "login") it.acquire = { type: "login", days: parseInt(v("days", 7), 10) || 0 };
+  else if (t === "limited") it.acquire = { type: "limited", from: v("from", ""), to: v("to", "") };
+  try { await saveCatalog(); renderSkins(); msg("skMsg", "手に入れ方を保存しました", "ok"); }
+  catch (e) { msg("skMsg", "保存に失敗：" + e.message, "err"); }
+}
+
 async function saveCatalog() {
   catalog.updated = new Date().toISOString();
   const res = await api("/rest/v1/vr_catalog?on_conflict=id", { method: "POST",
