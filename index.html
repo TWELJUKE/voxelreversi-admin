@@ -98,12 +98,13 @@
       <section class="card">
         <h2>ユーザー状況</h2>
         <div class="row">
-          <div class="stat big">総ユーザー数 <b id="stTotal">-</b> 人</div>
+          <div class="stat big">登録ユーザー数 <b id="stTotal">-</b> 人</div>
+          <div class="stat">うち 名前あり <b id="stNamed">-</b> 人</div>
           <div class="stat big">オンライン <b id="stOnline">-</b> 人</div>
           <div class="stat big">課金者数 <b id="stPaid">-</b> 人</div>
           <button onclick="loadStats()">更新</button>
         </div>
-        <div class="sub" id="onlineDetail">オンライン＝最終アクセスが5分以内。プレイ中は約60秒ごとに更新されます。</div>
+        <div class="sub" id="onlineDetail">登録ユーザー数＝アプリを起動した端末ごとの登録数です（アプリを入れ直すと増えます）。オンライン＝最終アクセスが5分以内。プレイ中は約60秒ごとに更新されます。</div>
         <div class="msg" id="statMsg"></div>
       </section>
 
@@ -117,6 +118,7 @@
         </div>
         <div id="tierBars"></div>
         <div class="sub" style="margin-top:6px">RPの分布（1区切り=100RP / 1ティア=300RP）</div>
+        <div class="sub">プロフィール登録＝アプリがランクをクラウドに保存できた人数です。アプリ側が古いとここが0のままになるので、再ビルドして起動すると増えます。</div>
       </section>
 
       <section class="card">
@@ -368,11 +370,13 @@ function rankName(rp) {
 async function loadStats() {
   msg("statMsg", "読み込み中…");
   try {
-    const total = await countOf("/rest/v1/vr_players?select=code");
-    const since = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-    const online = await countOf("/rest/v1/vr_players?select=code&last_seen=gt." + encodeURIComponent(since));
-    $("stTotal").textContent = total;
-    $("stOnline").textContent = online;
+        const total = await countOf("/rest/v1/vr_players?select=code");
+        const named = await countOf("/rest/v1/vr_players?select=code&name=neq.");
+        const since = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+        const online = await countOf("/rest/v1/vr_players?select=code&last_seen=gt." + encodeURIComponent(since));
+        $("stTotal").textContent = total;
+        $("stNamed").textContent = named;
+        $("stOnline").textContent = online;
 
     // 課金(vr_purchases)
     let paid = "-", paidDetail = "";
